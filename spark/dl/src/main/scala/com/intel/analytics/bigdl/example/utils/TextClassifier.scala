@@ -29,6 +29,8 @@ import com.intel.analytics.bigdl.example.utils.SimpleTokenizer._
 import org.apache.spark.SparkContext
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.Row
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.mutable.{ArrayBuffer, Map => MMap}
@@ -147,7 +149,18 @@ class TextClassifier(param: AbstractTextClassificationParams) extends Serializab
     val embeddingDim = param.embeddingDim
     val trainingSplit = param.trainingSplit
     // For large dataset, you might want to get such RDD[(String, Float)] from HDFS
-    val dataRdd = sc.parallelize(loadRawData(), param.partitionNum)
+    val dataRdd = if (param.baseDir.startsWith("hdfs://") && param.baseDir.endsWith(".parquet")) {
+      val spark = SparkSession.builder().getOrCreate()
+      import spark.sqlContext.implicits._
+      val inputDF = spark.read.parquet(param.baseDir)
+      val inputRDD = inputDF.select($"content", $"labelNonZero").rdd
+      inputRDD.map { case Row(content: String, labelNonZero: Double) =>
+        (content, labelNonZero.toFloat)
+      }
+    } else {
+      sc.parallelize(loadRawData(), param.partitionNum)
+    }
+
     val (word2Meta, word2Vec) = analyzeTexts(dataRdd)
     val word2MetaBC = sc.broadcast(word2Meta)
     val word2VecBC = sc.broadcast(word2Vec)
