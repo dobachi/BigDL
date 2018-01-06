@@ -211,7 +211,18 @@ class TextClassifier(param: AbstractTextClassificationParams) extends Serializab
     val trainingSplit = param.trainingSplit
 
     // For large dataset, you might want to get such RDD[(String, Float)] from HDFS
-    val dataRdd = sc.parallelize(loadRawData(), param.partitionNum)
+    val dataRdd = if (param.baseDir.startsWith("hdfs://") && param.baseDir.endsWith(".parquet")) {
+      val spark = SparkSession.builder().getOrCreate()
+      import spark.sqlContext.implicits._
+      val inputDF = spark.read.parquet(param.baseDir)
+      val inputRDD = inputDF.select($"content", $"labelNonZero").rdd
+      inputRDD.map { case Row(content: String, labelNonZero: Double) =>
+        (content, labelNonZero.toFloat)
+      }
+    } else {
+      sc.parallelize(loadRawData(), param.partitionNum)
+    }
+
     val (word2Meta, word2Vec) = analyzeTexts(dataRdd)
     val word2MetaBC = sc.broadcast(word2Meta)
     val word2VecBC = sc.broadcast(word2Vec)
