@@ -58,16 +58,31 @@ class TextClassifier(param: AbstractTextClassificationParams) extends Serializab
     log.info("Indexing word vectors.")
     val preWord2Vec = MMap[Float, Array[Float]]()
     val filename = s"$gloveDir/glove.6B.200d.txt"
-    for (line <- Source.fromFile(filename, "ISO-8859-1").getLines) {
-      val values = line.split(" ")
-      val word = values(0)
-      if (word2Meta.contains(word)) {
-        val coefs = values.slice(1, values.length).map(_.toFloat)
-        preWord2Vec.put(word2Meta(word).index.toFloat, coefs)
+    if (param.baseDir.startsWith("hdfs://")) {
+      val spark = SparkSession.builder().getOrCreate()
+      val gloveRDD = spark.sparkContext.textFile(filename)
+      val coefsRDD = gloveRDD.map(_.split((" "))).flatMap{ arr =>
+        val word = arr(0)
+        if (word2Meta.contains(word)) {
+          val coefs = arr.slice(1, arr.length).map(_.toFloat)
+          Some(word2Meta(word).index.toFloat, coefs)
+        } else {
+          None
+        }
       }
+      coefsRDD.collect.toMap
+    } else {
+      for (line <- Source.fromFile(filename, "ISO-8859-1").getLines) {
+        val values = line.split(" ")
+        val word = values(0)
+        if (word2Meta.contains(word)) {
+          val coefs = values.slice(1, values.length).map(_.toFloat)
+          preWord2Vec.put(word2Meta(word).index.toFloat, coefs)
+        }
+      }
+      log.info(s"Found ${preWord2Vec.size} word vectors.")
+      preWord2Vec.toMap
     }
-    log.info(s"Found ${preWord2Vec.size} word vectors.")
-    preWord2Vec.toMap
   }
 
   /**
@@ -211,10 +226,10 @@ class TextClassifier(param: AbstractTextClassificationParams) extends Serializab
     val trainingSplit = param.trainingSplit
 
     // For large dataset, you might want to get such RDD[(String, Float)] from HDFS
-    val dataRdd = if (param.baseDir.startsWith("hdfs://") && param.baseDir.endsWith(".parquet")) {
+    val dataRdd = if (param.baseDir.startsWith("hdfs://")) {
       val spark = SparkSession.builder().getOrCreate()
       import spark.sqlContext.implicits._
-      val inputDF = spark.read.parquet(param.baseDir)
+      val inputDF = spark.read.parquet(param.baseDir + "/text.parquet")
       val inputRDD = inputDF.select($"content", $"labelNonZero").rdd
       inputRDD.map { case Row(content: String, labelNonZero: Double) =>
         (content, labelNonZero.toFloat)
