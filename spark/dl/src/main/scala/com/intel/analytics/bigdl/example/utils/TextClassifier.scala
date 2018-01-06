@@ -230,7 +230,7 @@ class TextClassifier(param: AbstractTextClassificationParams) extends Serializab
       val spark = SparkSession.builder().getOrCreate()
       import spark.sqlContext.implicits._
       val inputDF = spark.read.parquet(param.baseDir + "/text.parquet")
-      classNum = inputDF.select($"labelNonZero").distinct().count()
+      classNum = inputDF.select($"labelNonZero").distinct().count().toInt
       val inputRDD = inputDF.select($"content", $"labelNonZero").rdd
       inputRDD.map { case Row(content: String, labelNonZero: Double) =>
         (content, labelNonZero.toFloat)
